@@ -1,0 +1,271 @@
+#Weekly OWS data commands#
+
+# install package so I can download excel files
+install.packages("gdata")
+
+							 
+# load gdata package 
+library(gdata)
+
+# documentation                   
+help(read.xls)                  
+
+# read from first sheet
+# changed name
+OWS = read.xls("/Users/JG/Desktop/Research/Dissertation/Data/Chapter Four Data/Weekly Data.xls")   
+OWS<-read.csv("~/Desktop/R/Working Directory/OWSdata.csv")
+
+#clean up
+rm(list=ls(OWS))
+
+#Check out/inspect data
+summary(OWS)
+OWS
+
+#Set Working Directory: REVISE THIS TO WHERE YOU SAVE THE DATA.
+setwd("/Users/juliangottlieb/Desktop/R/Working Directory")
+
+#summary of particular variables
+summary(OWS$Stories)
+
+#list variables
+ls(OWS)
+
+#rename variables
+
+ install.packages("reshape")
+ require(reshape)
+ OWS<-rename(OWS,c(Article.Con="artcon"))
+ OWS<-rename(OWS,c(Article.Econ="artecon"))
+ OWS<-rename(OWS,c(Article.Mix="artmix"))
+ OWS<-rename(OWS,c(OPED.Con="opedcon"))
+ OWS<-rename(OWS,c(OPED.Econ="opedecon"))
+ OWS<-rename(OWS,c(OPED.Mix="opedmix"))
+ OWS<-rename(OWS,c(X99..Meme="ninetynine"))
+ ls(OWS)
+
+
+#Load Libraries
+library(MASS)
+library(TSA)
+library(foreign)
+library(lattice)
+
+#Load Patrick Brandt's code for a Poisson autoregressive model:
+source('http://www.utdallas.edu/~pbrandt/code/pests.r')
+
+
+
+#install pastecs for looking at mean and variance of depvar
+install.packages("pastecs")
+Library(pastecs)
+stat.desc(OWS$Stories)
+
+
+#Negative Binomial Model
+mymod<-glm.nb(OWS$Articles~OWS$Arrests)
+summary(mymod)
+
+
+#pearson's Chi squared and dispersion statistics
+pr <- sum(residuals(mymod, type="pearson")^2)
+
+pr
+
+#P-value for chi sq. 
+pchisq(pr, mymod$df.residual, lower=F)
+
+# calc p-vl
+pchisq(mymod$deviance, mymod$df.residual, lower=F)
+
+#pearson's Chi squared and dispersion statistics
+#Use Count Package
+library("COUNT")
+P__Disp(mymod)
+
+#z-Score Test  with regular Poisson model (GLM) Typically, there are better tests to use 
+#this helps me decide whether to use Poisson or NB model
+
+library(COUNT); data=OWS
+summary(poi <- glm(OWS$Stories ~ OWS$Arrests, family=poisson, data=OWS))
+mu <-predict(poi, type="response")
+z <- ((OWS$Stories - mu)^2 - OWS$Stories)/ (mu * sqrt(2))
+summary(zscore <- lm(z ~ 1))
+
+
+#Lagrange Multiplier Test
+
+obs <- nrow(OWS) 
+mmu <- mean(mu); nybar <- obs*mmu; musq <- mu*mu
+mu2 <- mean(musq)*obs ; chival <- (mu2 - nybar)^2/(2*mu2); chival 
+pchisq(chival,1,lower.tail = FALSE)
+
+
+#Quasi-likelihood Poisson Standard Errors, this method is not used much 
+#(I think when you compare se to QLse, the standard errors are smaller 
+  #with QLse perhaps indicating more accurate SE and p-value but the dispersion STAT seems the same)
+
+poiQL <- glm(OWS$Stories ~ OWS$Arrests, family=poisson, data=OWS)
+summary(poiQL)
+prql <-sum(residuals(poiQL, type="pearson")^2 )
+disp <- prql/poiQL$df.residual # Pearson dispersion
+se <-sqrt(diag(vcov(poiQL))); QLse <- se/sqrt(disp); QLse
+
+
+# Robust Standard errors/sandwich (this is what I should report)
+library(sandwich)
+install.packages("haplo.ccs")
+library(haplo.ccs)
+poisandwich <- glm.nb(OWS$Stories ~ OWS$Arrests, data=OWS)
+vcovHC(poi); sqrt(diag(vcovHC(poi, type="HC0"))) # final HC0 = H-C-zero
+summary(mymod)
+summary(poisandwich)
+#Robust Standard errors did not look all that different
+
+
+
+
+# Clustering may not be necessary but here is the code
+poi <- glm(OWS$Stories ~ OWS$Arrests, family=poisson, data=OWS)
+library(haplo.ccs)
+sandcov(poi, OWS$provnum) #what goes in place of provnum??###########
+sqrt(diag(sandcov(poi, OWS$provnum))) #what goes in place of provnum??#########
+
+
+
+#Pearson Residuals
+presid <- residuals(mymod, type="pearson")
+presid
+
+#Pearson Chi2 (sum of residuals) and statistic and graph
+summary(mymod <- glm.nb(OWS$Stories ~ OWS$Arrests, data=OWS))
+presid <- residuals(mymod, type="pearson")
+pchi2 <- sum(residuals(mymod, type="pearson")^2) # Pearson Chi2
+
+summary(mymod <- glm.nb(OWS$Stories ~ OWS$Arrests, family=poisson, data=OWS))
+P__disp(mymod)
+mu <- predict(mymod)
+grd <- par(mfrow = c(2,2))
+plot(x=mu, y= OWS$Stories, main = "Response residuals")# figure margins too large???
+plot(x=mu, y= presid, main = "Pearson residuals") # figure margins are too large??
+
+
+
+#LR only if i'm checking whether I need certain predictor variables in the model
+#AIC is smaller when the model fit is better
+
+modelfit(mymod)
+
+#NB seems to be a better fit than standard GLM/Poisson
+
+
+
+#Comparing fit of Poisson to NB or NB2 vs. NB1
+
+# make certain the appropriate packages are loaded
+library(COUNT); data(OWS)
+# USING glm.nb
+summary(nbx <- glm.nb(OWS$Stories ~ OWS$Arrests, data=OWS))
+exp(coef(nbx)); exp(coef(nbx))*sqrt(diag(vcov(nbx)))
+exp(confint.default(nbx))
+alpha <- 1/nbx$theta; alpha; P__disp(nbx); modelfit(nbx)
+xbnb <- predict(poi1); munb <- exp(xbnb)
+# expected variance of NB model (using alpha where alpha=1/theta)
+mean(munb)+ (1/nbx$theta)*mean(munb)^2
+round(sqrt(rbind(diag(vcov(nbx)), diag(sandwich(nbx)))), digits=4)
+# USING nbinomial
+summary(nb1 <- nbinomial(OWS$Stories ~ OWS$Arrests, data=OWS))
+modelfit(nb1)
+
+
+# ============================================================
+library(COUNT);library(msme); data(OWS)
+# POISSON
+poi <- glm(OWS$Stories ~ OWS$Arrests, 
+family = poisson, data = OWS)
+summary(poi)
+#NB2
+summary(nb1 <- nbinomial(OWS$Stories ~ OWS$Arrests, data=OWS))
+# NB1
+library(gamlss)
+summary(gamlss(formula = OWS$Stories ~ OWS$Arrests, family = NBII, data = OWS))
+
+
+
+#PIG Models 
+install.packages("gamlss")
+library(gamlss)
+
+library(COUNT); library(msme); library(sandwich)
+data(OWS)
+summary(nbmod <- glm.nb(OWS$Stories ~ OWS$Arrests, data=OWS))
+vcovHC(nbmod)
+sqrt(diag(vcovHC(nbmod, type="HC0")))
+pigmod <- gamlss(OWS$Stories ~ OWS$Arrests, data=OWS, family=PIG)
+summary(pigmod)
+exp(coef(pigmod))
+vcovHC(pigmod)
+sqrt(diag(vcovHC(pigmod, type="HC0")))
+
+
+
+#Expected number of 0 counts
+exp(-1.845) * 1.845^0 / exp(log(factorial(0)))
+148* (exp(-1.845) * 1.845^0 / exp(log(factorial(0))))
+
+#mine comes out to 23.4 expected zeros and 15% of PDF should be zeros 
+#but the observed is 56% zeros and 84/148 zeros
+
+#Zero Inflated Models
+
+#ZIP
+install.packages("pscl")
+library(pscl); library(COUNT)
+data(OWS) 
+poi <- glm(OWS$Stories ~ OWS$Arrests, data=OWS, dist="poisson")
+zip <- zeroinfl(OWS$Stories ~ OWS$Arrests, data=OWS, dist="poisson")
+summary(zip)
+print(vuong(zip,poi))
+exp(coef(zinp))
+round(colSums(predict(zip, type="prob")[,1:32])) # expected counts
+rbind(obs=table(OWS$Stories)[1:32]) # observed counts
+#
+
+#ZINB
+library(pscl); library(COUNT)
+data(OWS)
+nb2 <- glm.nb(OWS$Stories ~ OWS$Arrests, data=OWS)
+zinb <- zeroinfl(OWS$Stories ~ OWS$Arrests, data=OWS, dist="negbin")
+summary(zinb)
+print(vuong(zinb,nb2))
+exp(coef(zinb))
+pred <- round(colSums(predict(zinb, type="prob")[,1:32])) # expected counts
+obs <- table(OWS$Stories)[1:32] # observed counts
+rbind(obs, pred)
+
+
+#Observed vs. Expected Counts 
+
+library(COUNT); data=OWS; 
+summary(poi1 <- glm(OWS$Stories ~ OWS$Arrests, family=poisson, data=OWS))
+pr <- sum(residuals(poi1, type="pearson")^2) # Pearson Chi2
+pr/poi1$df.residual # dispersion statistic
+poi1$aic / (poi1$df.null+1) # AIC/n
+exp(coef(poi1)) # IRR
+exp(coef(poi1))*sqrt(diag(vcov(poi1))) # delta method 
+exp(confint.default(poi1)) # CI of IRR
+modelfit(poi1) # same as Stata abic
+sd(OWS$Stories)^2 # observed variance
+xbp <- predict(poi1) # xb, linear predictor
+mup <- exp(xbp) # mu, fitted Poisson 
+mean(mup) # expected variance: mean=variance
+# Table of observed vs expected counts
+rbind(obs=table(OWS$Stories)[1:32], 
+ exp = round(sapply(0:32, function(x)sum(dpois(x, fitted(poi1))))))
+meany <- mean(OWS$Stories) # mean docvis
+expect0 <- exp(-meany)*meany^0 / exp(log(factorial(0))) # expected prob of 0
+zerodays <- (poi1$df.null+1) *expect0 # expected zero days
+obs=table(OWS$Stories)[1:32] # observed number values in each count 0-17
+exp = round(sapply(0:32, function(x)sum(dpois(x, fitted(poi1)))) # expected count
+chisq.test(obs, exp) # ChiSq test if obs & exp from same pop
+
